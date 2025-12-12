@@ -19,6 +19,9 @@ class FrankaBinStackIKRelMimicEnvCfg(FrankaBinStackEnvCfg, MimicEnvCfg):
 
         # post init of parents
         super().__post_init__()
+        # self.scene.robot.init_state.pos = (0.1, 0.1, 0.0)
+
+
 
         # Override the existing values
         self.datagen_config.name = "demo_src_stack_isaac_lab_task_D0"
@@ -41,7 +44,7 @@ class FrankaBinStackIKRelMimicEnvCfg(FrankaBinStackEnvCfg, MimicEnvCfg):
                 subtask_term_offset_range=(0, 0),
                 selection_strategy="nearest_neighbor_object",
                 selection_strategy_kwargs={"nn_k": 3},
-                action_noise=0.03,
+                action_noise=0.0,
                 num_interpolation_steps=0,
                 num_fixed_steps=0,
                 apply_noise_during_interpolation=False,
@@ -56,7 +59,7 @@ class FrankaBinStackIKRelMimicEnvCfg(FrankaBinStackEnvCfg, MimicEnvCfg):
                 subtask_term_offset_range=(0, 0),
                 selection_strategy="nearest_neighbor_object",
                 selection_strategy_kwargs={"nn_k": 3},
-                action_noise=0.03,
+                action_noise=0.0,
                 num_interpolation_steps=0,
                 num_fixed_steps=0,
                 apply_noise_during_interpolation=False,
@@ -70,7 +73,7 @@ class FrankaBinStackIKRelMimicEnvCfg(FrankaBinStackEnvCfg, MimicEnvCfg):
                 subtask_term_offset_range=(0, 0),
                 selection_strategy="nearest_neighbor_object",
                 selection_strategy_kwargs={"nn_k": 3},
-                action_noise=0.03,
+                action_noise=0.0,
                 num_interpolation_steps=0,
                 num_fixed_steps=0,
                 apply_noise_during_interpolation=False,
@@ -84,7 +87,7 @@ class FrankaBinStackIKRelMimicEnvCfg(FrankaBinStackEnvCfg, MimicEnvCfg):
                 subtask_term_offset_range=(0, 0),
                 selection_strategy="nearest_neighbor_object",
                 selection_strategy_kwargs={"nn_k": 3},
-                action_noise=0.03,
+                action_noise=0.0,
                 num_interpolation_steps=0,
                 num_fixed_steps=0,
                 apply_noise_during_interpolation=False,

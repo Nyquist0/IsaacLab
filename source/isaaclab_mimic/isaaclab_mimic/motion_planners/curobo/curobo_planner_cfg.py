@@ -409,7 +409,8 @@ class CuroboPlannerCfg:
     def franka_stack_cube_bin_config(cls) -> "CuroboPlannerCfg":
         """Create configuration for Franka stacking cube in a bin."""
         config = cls.franka_config()
-        config.static_objects = ["bin", "table"]
+        # HERE: useful in Loco-Manipulation tasks.
+        config.static_objects = [] # "bin", "table"
         config.gripper_closed_positions = {"panda_finger_joint1": 0.024, "panda_finger_joint2": 0.024}
         config.approach_distance = 0.05
         config.retreat_distance = 0.07
@@ -426,7 +427,8 @@ class CuroboPlannerCfg:
     def franka_stack_cube_config(cls) -> "CuroboPlannerCfg":
         """Create configuration for Franka stacking a normal cube."""
         config = cls.franka_config()
-        config.static_objects = ["table"]
+        # HERE: useful in Loco-Manipulation tasks.
+        config.static_objects = [] # "table"
         config.visualize_plan = False
         config.debug_planner = False
         config.motion_noise_scale = 0.02

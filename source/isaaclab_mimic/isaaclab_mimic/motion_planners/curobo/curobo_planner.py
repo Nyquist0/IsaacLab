@@ -27,6 +27,7 @@ from isaaclab.envs.manager_based_env import ManagerBasedEnv
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sim.spawners.materials import PreviewSurfaceCfg
 from isaaclab.sim.spawners.meshes import MeshSphereCfg, spawn_mesh_sphere
+from isaaclab.utils.math import subtract_frame_transforms
 
 from isaaclab_mimic.motion_planners.curobo.curobo_planner_cfg import CuroboPlannerCfg
 from isaaclab_mimic.motion_planners.motion_planner_base import MotionPlannerBase
@@ -627,8 +628,17 @@ class CuroboPlanner(MotionPlannerBase):
             current_pos_raw = obj.data.root_pos_w[self.env_id] - env_origin
             current_quat_raw = obj.data.root_quat_w[self.env_id]  # (w, x, y, z)
 
+            # FIXME: world to robot coordinate
+            robot_base_pos = self.robot.data.root_pos_w[self.env_id, :3]
+            robot_base_quat = self.robot.data.root_quat_w[self.env_id]  # [w, x, y, z]
+
+            current_pos_raw, current_quat_raw = subtract_frame_transforms(
+                robot_base_pos, robot_base_quat,    # 机器人基座相对于 env
+                current_pos_raw, current_quat_raw    # 物体相对于机器人基座
+            )
+
             # Convert to cuRobo device and extract float values for pose list
-            current_pos = self._to_curobo_device(current_pos_raw)
+            current_pos = self._to_curobo_device(current_pos_raw) # HERE: in world coordinate
             current_quat = self._to_curobo_device(current_quat_raw)
 
             # Convert to cuRobo pose format [x, y, z, w, x, y, z]
@@ -1297,8 +1307,8 @@ class CuroboPlanner(MotionPlannerBase):
         target_poses: list[Pose] = []
         contacts: list[bool] = []
 
-        if retreat_distance is not None and retreat_distance > 0:
-            ee_pose: Pose = self.get_ee_pose(start_state)
+        if retreat_distance is not None and retreat_distance > 0: 
+            ee_pose: Pose = self.get_ee_pose(start_state) # HERE: ee_pose is in robot coordinate.
             retreat_pose: Pose = ee_pose.multiply(
                 self._make_pose(
                     position=[0.0, 0.0, -retreat_distance],
@@ -1342,7 +1352,8 @@ class CuroboPlanner(MotionPlannerBase):
             else:
                 full_plan = full_plan.stack(self._current_plan)
 
-            last_waypoint: torch.Tensor = self._current_plan.position[-1]
+            last_waypoint: torch.Tensor = self._current_plan.position[-1] # FIXME: translate to robot coordinate.
+
             current_state = JointState(
                 position=last_waypoint.unsqueeze(0),
                 velocity=torch.zeros_like(last_waypoint.unsqueeze(0)),
@@ -1518,8 +1529,13 @@ class CuroboPlanner(MotionPlannerBase):
             # without advancing the main plan index in get_next_waypoint_ee_pose
             next_joint_state: JointState = self._current_plan[self._plan_index]
             self._plan_index += 1  # Manually advance index for this loop
-            eef_state: Any = self.motion_gen.compute_kinematics(next_joint_state)
+            eef_state: Any = self.motion_gen.compute_kinematics(next_joint_state) # FIXME: 这是机器人坐标系的，应该转成世界坐标系。
             planned_pose: Pose | None = eef_state.ee_pose
+
+            # HERE: make trajectory from robot coordinate to world coordinate.
+            # HERE: useful in Loco-Manipulation tasks.
+            robot_root_pose = self.robot.data.root_pos_w[self.env_id]
+            planned_pose = self._make_pose(position=robot_root_pose).multiply(planned_pose)
 
             if planned_pose is not None:
                 # Convert pose to environment device for compatibility

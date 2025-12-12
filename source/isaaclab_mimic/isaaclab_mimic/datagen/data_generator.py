@@ -586,6 +586,27 @@ class DataGenerator:
         # and then execute it once we have the trajectory.
         traj_to_execute = WaypointTrajectory()
 
+        # if self.env_cfg.datagen_config.generation_interpolate_from_last_target_pose and (not is_first_subtask):
+        #     # Interpolation segment will start from last target pose (which may not have been achieved).
+        #     assert prev_executed_traj is not None
+        #     last_waypoint = prev_executed_traj[-1]
+        #     init_sequence = WaypointSequence(sequence=[last_waypoint])
+        # else:
+        #     # Interpolation segment will start from current robot eef pose.
+        #     init_sequence = WaypointSequence.from_poses(
+        #         poses=self.env.get_robot_eef_pose(env_ids=[env_id], eef_name=eef_name)[0].unsqueeze(0),
+        #         gripper_actions=subtask_trajectory[0].gripper_action.unsqueeze(0),
+        #         action_noise=self.env_cfg.subtask_configs[eef_name][subtask_index].action_noise,
+        #     )
+
+        # init_sequence = WaypointSequence.from_poses(
+        #     poses=self.env.get_robot_eef_pose(env_ids=[env_id], eef_name=eef_name)[0].unsqueeze(0),
+        #     gripper_actions=subtask_trajectory[0].gripper_action.unsqueeze(0),
+        #     action_noise=self.env_cfg.subtask_configs[eef_name][subtask_index].action_noise,
+        # )
+
+        # traj_to_execute.add_waypoint_sequence(init_sequence) # FIXME: do not merge with previous traj
+
         if self.env_cfg.datagen_config.generation_interpolate_from_last_target_pose and (not is_first_subtask):
             # Interpolation segment will start from last target pose (which may not have been achieved).
             assert prev_executed_traj is not None
@@ -599,7 +620,6 @@ class DataGenerator:
                 action_noise=self.env_cfg.subtask_configs[eef_name][subtask_index].action_noise,
             )
         traj_to_execute.add_waypoint_sequence(init_sequence)
-
         # Merge this trajectory into our trajectory using linear interpolation.
         # Interpolation will happen from the initial pose (@init_sequence) to the first element of @transformed_seq.
         traj_to_execute.merge(
@@ -674,6 +694,9 @@ class DataGenerator:
         generated_obs = []
         generated_actions = []
         generated_success = False
+        
+        dynamic_root_pose = None
+        idx_move_root = 0
 
         # some eef-specific state variables used during generation
         current_eef_selected_src_demo_indices = {}
@@ -718,6 +741,21 @@ class DataGenerator:
                         # remains None, so this condition is always True and the else-branch below is never taken.
                         # The else-branch is only used right after executing a motion-planned transition (skillgen)
                         # to resume the actual subtask trajectory.
+
+                        idx_move_root += 1 # HERE: current_eef_subtask_trajectories
+
+                        # FIXME: temporarily adjust robot's position to simulate locomotion.
+                        if idx_move_root == 1: # initial position
+                            dynamic_root_pose = [[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]]
+                            root_pose = torch.tensor(dynamic_root_pose, device=self.env.device)
+                            self.env.scene['robot'].write_root_pose_to_sim(root_pose)
+
+                        if idx_move_root == 5: # place red block and about to reach green block, we assume movement by locomotion happens here.
+                            dynamic_root_pose = [[0.0, 0.35, 0.0, 1.0, 0.0, 0.0, 0.0]]
+
+                            root_pose = torch.tensor(dynamic_root_pose, device=self.env.device)
+                            self.env.scene['robot'].write_root_pose_to_sim(root_pose)
+
                         if next_eef_subtask_indices_after_motion[eef_name] is None:
                             # This is the beginning of a new subtask, so generate a new trajectory accordingly
                             eef_subtask_trajectory = self.generate_eef_subtask_trajectory(
@@ -731,8 +769,33 @@ class DataGenerator:
                             # With skillgen, use a motion planner to transition between subtasks.
                             if self.env_cfg.datagen_config.use_skillgen:
                                 # Define the goal for the motion planner: the start of the next subtask.
-                                target_eef_pose = eef_subtask_trajectory[0].pose
+                                target_eef_pose = eef_subtask_trajectory[0].pose # FIXME: make it in robot coordinate.
                                 target_gripper_action = eef_subtask_trajectory[0].gripper_action
+
+                                ###########
+                                # 获取机器人基座的位姿（世界坐标系）
+                                robot_root_pos_w = self.env.scene['robot'].data.root_pos_w[env_id]  # shape: (3,)
+                                robot_root_quat_w = self.env.scene['robot'].data.root_quat_w[env_id]  # shape: (4,) [w,x,y,z]
+
+                                # 从 4x4 变换矩阵中提取位置和四元数
+                                target_pos_w = target_eef_pose[:3, 3]  # 世界坐标系下的目标位置
+                                target_rot_mat = target_eef_pose[:3, :3]  # 世界坐标系下的旋转矩阵
+                                target_quat_w = PoseUtils.quat_from_matrix(target_rot_mat)  # 转换为四元数 [w,x,y,z]
+
+                                # 将世界坐标系下的目标位姿转换到机器人基座坐标系
+                                # T_robot_to_target = T_world_to_robot^(-1) * T_world_to_target
+                                target_pos_b, target_quat_b = PoseUtils.subtract_frame_transforms(
+                                    robot_root_pos_w.unsqueeze(0),  # 添加 batch 维度
+                                    robot_root_quat_w.unsqueeze(0),
+                                    target_pos_w.unsqueeze(0),
+                                    target_quat_w.unsqueeze(0)
+                                )
+                                target_rot_b = PoseUtils.matrix_from_quat(target_quat_b)  # shape: (1, 3, 3)
+                                # 2. 用位置和旋转矩阵构建 4x4 变换矩阵
+                                target_eef_pose = PoseUtils.make_pose(target_pos_b, target_rot_b)  # shape: (1, 4, 4)
+                                # 3. 去除 batch 维度
+                                target_eef_pose = target_eef_pose[0]  # shape: (4, 4)
+                                ###########
 
                                 # Determine expected object attachment using environment-specific logic (optional)
                                 expected_attached_object = None
@@ -748,7 +811,7 @@ class DataGenerator:
                                     print(f"Expected attached object: {expected_attached_object}")
 
                                     # This call updates the planner's world model and computes the trajectory.
-                                    planning_success = motion_planner.update_world_and_plan_motion(
+                                    planning_success = motion_planner.update_world_and_plan_motion( # FIXME: 撤退的时候是从 红色方块 位置撤退的。
                                         target_pose=target_eef_pose,
                                         expected_attached_object=expected_attached_object,
                                         env_id=env_id,
@@ -769,7 +832,7 @@ class DataGenerator:
                                         current_eef_subtask_indices[eef_name] = -1
 
                                         # Convert the planner's output into a sequence of waypoints to be executed.
-                                        current_eef_subtask_trajectories[eef_name] = (
+                                        current_eef_subtask_trajectories[eef_name] = ( # HERE: get results from motion planner
                                             self._convert_planned_trajectory_to_waypoints(
                                                 motion_planner, target_gripper_action
                                             )
@@ -808,6 +871,8 @@ class DataGenerator:
                                 prev_executed_traj,
                                 next_eef_subtask_trajectories_after_motion[eef_name],
                             )
+
+                            # current_eef_subtask_trajectories[eef_name] = next_eef_subtask_trajectories_after_motion[eef_name]
                             current_eef_subtask_step_indices[eef_name] = 0
                             next_eef_subtask_trajectories_after_motion[eef_name] = None
                             next_eef_subtask_indices_after_motion[eef_name] = None
